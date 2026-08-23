@@ -118,6 +118,27 @@ public final class ShotsToStitchesConverter: ShotsToStitchesConverting {
         let initialSafeHeight = height - chrome.top - chrome.bottom
         guard initialSafeHeight > 0 else { throw ShotsToStitchesError.insufficientOverlap }
 
+        // `chrome.top` is derived from frame PAIRS (1...N), so it only proves
+        // that region is static once scrolling is under way. Frame 0 has no
+        // predecessor: if it was captured before any scrolling happened, that
+        // same screen band shows live, unique page content rather than
+        // pinned/fixed chrome, and blindly cropping `chrome.top` off it would
+        // delete content that exists nowhere else in the sequence. Verify the
+        // band is genuinely present in frame 0 by comparing it directly
+        // against a later, presumably-settled frame, and only crop as far as
+        // the two frames actually agree.
+        let firstFrameChromeTop = verifiedFirstFrameChromeTop(
+            firstFrame: allCGImages[0],
+            referenceFrame: allCGImages[1],
+            candidateTop: chrome.top
+        )
+        if firstFrameChromeTop != chrome.top {
+            logger.info("First frame chrome unverified — using \(firstFrameChromeTop) instead of \(chrome.top) to avoid cropping unique content")
+        }
+
+        let firstSegmentHeight = height - firstFrameChromeTop - chrome.bottom
+        guard firstSegmentHeight > 0 else { throw ShotsToStitchesError.insufficientOverlap }
+
         // Segments are accumulated in a running coordinate space that can grow
         // in EITHER direction: `topCursor` tracks the current top edge of the
         // stitched page, `bottomCursor` tracks the current bottom edge. A
@@ -128,13 +149,13 @@ public final class ShotsToStitchesConverter: ShotsToStitchesConverting {
         segments.append(
             StitchSegment(
                 image: allCGImages[0],
-                cropRect: CGRect(x: 0, y: CGFloat(chrome.top), width: CGFloat(width), height: CGFloat(initialSafeHeight)),
-                drawRect: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(initialSafeHeight))
+                cropRect: CGRect(x: 0, y: CGFloat(firstFrameChromeTop), width: CGFloat(width), height: CGFloat(firstSegmentHeight)),
+                drawRect: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(firstSegmentHeight))
             )
         )
 
         var topCursor: CGFloat = 0
-        var bottomCursor: CGFloat = CGFloat(initialSafeHeight)
+        var bottomCursor: CGFloat = CGFloat(firstSegmentHeight)
         let sequenceHandler = VNSequenceRequestHandler()
 
         for i in 1..<allCGImages.count {
@@ -288,6 +309,74 @@ public final class ShotsToStitchesConverter: ShotsToStitchesConverting {
             return (sorted[mid - 1] + sorted[mid]) / 2
         }
         return sorted[mid]
+    }
+
+    /// Verifies how much of a globally-derived `candidateTop` chrome band is
+    /// actually present in the first frame, rather than assuming it applies
+    /// uniformly. `chrome.top` is measured from consecutive frame pairs
+    /// (1...N), which only tells us that band is static *once scrolling has
+    /// started* — it says nothing about frame 0, which may have been
+    /// captured before any scroll occurred and therefore shows real page
+    /// content in that same band instead of pinned chrome.
+    ///
+    /// True fixed chrome (an OS status bar, a pinned in-app header) is
+    /// screen-locked, so if it's genuinely present in frame 0, its pixels
+    /// should closely match the same rows in frame 1. If frame 0 instead
+    /// shows unique unscrolled content there, the rows will disagree almost
+    /// immediately. This deliberately compares only against the very next
+    /// frame rather than a distant one: overlays like a screen-recording
+    /// timer or a translucent status bar showing whatever page content sits
+    /// behind it never stay byte-static over the full capture, so a distant
+    /// frame would fail this check even where real chrome exists. Frame 1
+    /// is the closest thing to "was this already-scrolled chrome at capture
+    /// start", and failing to verify is the safe direction to fail in — at
+    /// worst a sliver of true chrome survives on frame 0's own edge, which
+    /// is far better than deleting content that exists nowhere else.
+    private func verifiedFirstFrameChromeTop(
+        firstFrame: CGImage,
+        referenceFrame: CGImage,
+        candidateTop: Int
+    ) -> Int {
+        guard candidateTop > 0 else { return 0 }
+        guard firstFrame !== referenceFrame,
+              let dataA = firstFrame.dataProvider?.data,
+              let dataB = referenceFrame.dataProvider?.data,
+              let ptrA = CFDataGetBytePtr(dataA),
+              let ptrB = CFDataGetBytePtr(dataB) else {
+            return candidateTop
+        }
+
+        let bytesPerRowA = firstFrame.bytesPerRow
+        let bytesPerRowB = referenceFrame.bytesPerRow
+        let bytesToCompare = min(firstFrame.width, referenceFrame.width) * (firstFrame.bitsPerPixel / 8)
+        let rowTolerance: Int = 6 // same tolerance as compareFrameChrome, for consistency
+        let rowCount = min(candidateTop, min(firstFrame.height, referenceFrame.height))
+
+        func rowIsStatic(_ y: Int) -> Bool {
+            let offsetA = y * bytesPerRowA
+            let offsetB = y * bytesPerRowB
+            var aFloats = [Float](repeating: 0, count: bytesToCompare)
+            var bFloats = [Float](repeating: 0, count: bytesToCompare)
+            vDSP_vfltu8(ptrA + offsetA, 1, &aFloats, 1, vDSP_Length(bytesToCompare))
+            vDSP_vfltu8(ptrB + offsetB, 1, &bFloats, 1, vDSP_Length(bytesToCompare))
+            var diffFloats = [Float](repeating: 0, count: bytesToCompare)
+            vDSP_vsub(bFloats, 1, aFloats, 1, &diffFloats, 1, vDSP_Length(bytesToCompare))
+            vDSP_vabs(diffFloats, 1, &diffFloats, 1, vDSP_Length(bytesToCompare))
+            var total: Float = 0
+            vDSP_sve(diffFloats, 1, &total, vDSP_Length(bytesToCompare))
+            let mean = Double(total) / Double(bytesToCompare)
+            return mean <= Double(rowTolerance)
+        }
+
+        var verifiedTop = 0
+        for y in 0..<rowCount {
+            if rowIsStatic(y) {
+                verifiedTop += 1
+            } else {
+                break
+            }
+        }
+        return verifiedTop
     }
 
     /// Row-tolerant chrome comparison. Frames decoded from a lossy video

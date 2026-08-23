@@ -11,20 +11,28 @@ import os
 // MARK: - Frame Filter
 
 public struct FrameFilter {
-    /// Detects whether an image represents the iOS Control Center overlay.
-    ///
-    /// - Parameter image: The `CGImage` to evaluate.
-    /// - Returns: `true` if the image resembles the Control Center, `false` otherwise.
-    public static func isIosControlCenter(_ image: CGImage) -> Bool {
+    /// Diagnostic per-row metrics from the Control Center heuristic, exposed so real
+    /// Core Graphics resize output can be inspected directly instead of estimated.
+    public struct RowMetrics {
+        public let row: Int
+        public let s1Var: Double
+        public let s2Var: Double
+        public let contrastGap1: Double
+        public let contrastGap2: Double
+        public let contrastLeft: Double
+        public let contrastRight: Double
+    }
+
+    /// Computes the raw per-row metrics used by `isIosControlCenter`, without applying
+    /// the pass/fail thresholds. Returns `nil` if the aspect-ratio gate fails.
+    public static func controlCenterRowMetrics(_ image: CGImage) -> [RowMetrics]? {
         let w = image.width
         let h = image.height
 
-        // Control center is typically portrait and tall (at least 1.7 aspect ratio)
         if w >= h || Double(h) / Double(w) < 1.7 {
-            return false
+            return nil
         }
 
-        // Resize to 100x100 for analysis
         let targetSize = 100
         guard let context = CGContext(
             data: nil,
@@ -35,33 +43,30 @@ public struct FrameFilter {
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else {
-            return false
+            return nil
         }
 
         context.interpolationQuality = .high
         context.draw(image, in: CGRect(x: 0, y: 0, width: targetSize, height: targetSize))
 
-        guard let data = context.data else { return false }
+        guard let data = context.data else { return nil }
         let buffer = data.bindMemory(to: UInt8.self, capacity: targetSize * targetSize * 4)
 
         func getLum(x: Int, y: Int) -> Double {
-            let invertedY = targetSize - 1 - y
-            let idx = (invertedY * targetSize + x) * 4
+            let idx = (y * targetSize + x) * 4
             let r = Double(buffer[idx])
             let g = Double(buffer[idx + 1])
             let b = Double(buffer[idx + 2])
             return 0.299 * r + 0.587 * g + 0.114 * b
         }
 
-        var validRows = 0
-        let rowsToTest = [38, 40, 42]
-
-        for y in rowsToTest {
+        var results: [RowMetrics] = []
+        for y in [38, 40, 42] {
             var s1Var: Double = 0
             for x in 56...64 {
                 s1Var = max(s1Var, abs(getLum(x: x, y: y) - getLum(x: x - 1, y: y)))
             }
-            
+
             var s2Var: Double = 0
             for x in 76...84 {
                 s2Var = max(s2Var, abs(getLum(x: x, y: y) - getLum(x: x - 1, y: y)))
@@ -73,12 +78,30 @@ public struct FrameFilter {
             let lumLeft = getLum(x: 50, y: y)
             let lumRight = getLum(x: 90, y: y)
 
-            let contrastGap1 = abs(lumS1 - lumGap)
-            let contrastGap2 = abs(lumS2 - lumGap)
-            let contrastLeft = abs(lumS1 - lumLeft)
-            let contrastRight = abs(lumS2 - lumRight)
+            results.append(RowMetrics(
+                row: y,
+                s1Var: s1Var,
+                s2Var: s2Var,
+                contrastGap1: abs(lumS1 - lumGap),
+                contrastGap2: abs(lumS2 - lumGap),
+                contrastLeft: abs(lumS1 - lumLeft),
+                contrastRight: abs(lumS2 - lumRight)
+            ))
+        }
+        return results
+    }
 
-            if s1Var < 8 && s2Var < 8 && contrastGap1 > 15 && contrastGap2 > 15 && (contrastLeft > 12 || contrastRight > 12) {
+    /// Detects whether an image represents the iOS Control Center overlay.
+    ///
+    /// - Parameter image: The `CGImage` to evaluate.
+    /// - Returns: `true` if the image resembles the Control Center, `false` otherwise.
+    public static func isIosControlCenter(_ image: CGImage) -> Bool {
+        guard let rows = controlCenterRowMetrics(image) else { return false }
+
+        var validRows = 0
+        for m in rows {
+            if m.s1Var < 8 && m.s2Var < 8 && m.contrastGap1 > 15 && m.contrastGap2 > 15
+                && (m.contrastLeft > 12 || m.contrastRight > 12) {
                 validRows += 1
             }
         }
