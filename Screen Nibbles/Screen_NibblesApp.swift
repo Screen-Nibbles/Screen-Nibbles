@@ -2,8 +2,6 @@
 //  Screen_NibblesApp.swift
 //  Screen Nibbles
 //
-//  Created by Chih Hao Lin on 8/19/26.
-//
 
 import SwiftUI
 import SwiftData
@@ -12,7 +10,7 @@ import SwiftData
 struct Screen_NibblesApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Video.self, Stitch.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
