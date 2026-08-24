@@ -24,6 +24,10 @@ final class PinterestChromeOverlapTests: XCTestCase {
 
         let stitched = try await ShotsToStitchesConverter.stitch(images: [image1, image2])
 
+        if !stitched.isEmpty {
+            try writeStitchOutputs(stitched, testName: "PinterestChromeOverlapTests")
+        }
+
         XCTAssertEqual(
             stitched.count, 1,
             "pinterest1.jpg and pinterest2.jpg overlap substantially and should stitch into a single panorama, not split into \(stitched.count)."

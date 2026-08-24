@@ -22,6 +22,10 @@ final class ReplaceStitchTests: XCTestCase {
 
         let results = try await ShotsToStitchesConverter.stitch(images: images)
 
+        if !results.isEmpty {
+            try writeStitchOutputs(results, testName: "ReplaceStitchTests")
+        }
+
         XCTAssertEqual(
             results.count,
             1,

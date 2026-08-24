@@ -107,14 +107,12 @@ final class ParseFVRVideoAndStitchTests: XCTestCase {
             XCTFail("The first stitched image could not be read as a CGImage.")
         }
 
-        // Write results for visual inspection alongside the other
-        // end-to-end pipeline tests.
-        let outputRoot = projectRoot.appendingPathComponent("test_output")
-        let soloDir = outputRoot.appendingPathComponent("solo")
-        let stitchedDir = outputRoot.appendingPathComponent("stitched")
-        try? FileManager.default.removeItem(at: outputRoot)
+        // Write the extracted (pre-stitch) frames for visual inspection.
+        let soloDir = projectRoot
+            .appendingPathComponent("test_output")
+            .appendingPathComponent("solo")
+        try? FileManager.default.removeItem(at: soloDir)
         try FileManager.default.createDirectory(at: soloDir, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: stitchedDir, withIntermediateDirectories: true)
 
         for (index, frame) in extractedFrames.enumerated() {
             guard let data = frame.image.jpegData(compressionQuality: 0.9) else {
@@ -125,12 +123,10 @@ final class ParseFVRVideoAndStitchTests: XCTestCase {
             try data.write(to: soloDir.appendingPathComponent(filename))
         }
 
-        for (i, stitchedImage) in stitchedImages.enumerated() {
-            guard let stitchedData = stitchedImage.jpegData(compressionQuality: 0.9) else {
-                XCTFail("Stitched image \(i) failed to encode")
-                return
-            }
-            try stitchedData.write(to: stitchedDir.appendingPathComponent("stitched_\(i).jpg"))
+        // Write the stitched panorama(s) using the shared helper so every
+        // stitch-producing test leaves output behind the same way.
+        if !stitchedImages.isEmpty {
+            try writeStitchOutputs(stitchedImages, testName: "stitched")
         }
     }
 }

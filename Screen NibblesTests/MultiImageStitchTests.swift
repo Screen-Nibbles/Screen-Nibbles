@@ -22,6 +22,10 @@ final class MultiImageStitchTests: XCTestCase {
 
         let results = try await ShotsToStitchesConverter.stitch(images: [pin1, pin2])
 
+        if !results.isEmpty {
+            try writeStitchOutputs(results, testName: "MultiImageStitchTests")
+        }
+
         XCTAssertEqual(
             results.count, 1,
             "Pinterest 2-frame scroll must stitch into exactly one continuous vertical panorama."

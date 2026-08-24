@@ -27,6 +27,10 @@ final class GoingUpStitchTests: XCTestCase {
 
         let results = try await ShotsToStitchesConverter.stitch(images: images)
 
+        if !results.isEmpty {
+            try writeStitchOutputs(results, testName: "GoingUpStitchTests")
+        }
+
         XCTAssertEqual(
             results.count,
             1,

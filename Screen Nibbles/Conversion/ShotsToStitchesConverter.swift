@@ -240,25 +240,45 @@ public final class ShotsToStitchesConverter: ShotsToStitchesConverting {
                 }
                 let drawHeight = CGFloat(magnitude)
 
+                // Redraw the CURRENT frame's *entire* visible content band —
+                // not just the sliver of new content the shift revealed —
+                // positioned so its already-seen portion lands exactly back
+                // on top of whatever the previous frame(s) already drew
+                // there. `render(segments:...)` draws segments in append
+                // order, so this later (lower-in-the-scroll) frame's pixels
+                // always win over the earlier frame's pixels in that shared
+                // band, the same "later capture wins" rule already used for
+                // the near-zero-shift replace case above. Without this, only
+                // the brand-new sliver got the current frame's pixels and
+                // the overlap region kept whatever the older frame drew —
+                // so a floating/transient element (e.g. a nav pill) that
+                // happened to render into an earlier frame but not the
+                // current one would stick around, and vice versa.
                 if scrolledDown {
-                    // New content revealed at the bottom of `currentImg`.
-                    let cropY = height - chrome.bottom - magnitude
+                    // Bottom edge of the full band already lines up with
+                    // this frame's own bottom (minus chrome); its top now
+                    // reaches up into the previously-drawn overlap.
+                    // (`height - chrome.bottom - initialSafeHeight == chrome.top`.)
+                    let drawTop = bottomCursor + drawHeight - CGFloat(initialSafeHeight)
                     segments.append(
                         StitchSegment(
                             image: currentImg,
-                            cropRect: CGRect(x: 0, y: CGFloat(cropY), width: CGFloat(width), height: drawHeight),
-                            drawRect: CGRect(x: 0, y: bottomCursor, width: CGFloat(width), height: drawHeight)
+                            cropRect: CGRect(x: 0, y: CGFloat(chrome.top), width: CGFloat(width), height: CGFloat(initialSafeHeight)),
+                            drawRect: CGRect(x: 0, y: drawTop, width: CGFloat(width), height: CGFloat(initialSafeHeight))
                         )
                     )
                     bottomCursor += drawHeight
                 } else {
-                    // New content revealed at the top of `currentImg`.
+                    // Top edge of the full band already lines up with this
+                    // frame's own top (plus chrome); its bottom now reaches
+                    // down into the previously-drawn overlap.
                     let cropY = chrome.top
+                    let drawTop = topCursor - drawHeight
                     segments.append(
                         StitchSegment(
                             image: currentImg,
-                            cropRect: CGRect(x: 0, y: CGFloat(cropY), width: CGFloat(width), height: drawHeight),
-                            drawRect: CGRect(x: 0, y: topCursor - drawHeight, width: CGFloat(width), height: drawHeight)
+                            cropRect: CGRect(x: 0, y: CGFloat(cropY), width: CGFloat(width), height: CGFloat(initialSafeHeight)),
+                            drawRect: CGRect(x: 0, y: drawTop, width: CGFloat(width), height: CGFloat(initialSafeHeight))
                         )
                     )
                     topCursor -= drawHeight

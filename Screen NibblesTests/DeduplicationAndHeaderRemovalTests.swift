@@ -35,6 +35,10 @@ final class DeduplicationAndHeaderRemovalTests: XCTestCase {
 
         let results = try await ShotsToStitchesConverter.stitch(images: [h1, h2])
 
+        if !results.isEmpty {
+            try writeStitchOutputs(results, testName: "DeduplicationAndHeaderRemovalTests_HorizontalCarousel")
+        }
+
         XCTAssertEqual(results.count, 1, "Should produce 1 carousel strip.")
         guard let strip = results.first, let stripCG = strip.cgImage, let h1CG = h1.cgImage else {
             XCTFail("Failed to read carousel result image.")
@@ -66,6 +70,10 @@ final class DeduplicationAndHeaderRemovalTests: XCTestCase {
         let pin2 = try loadImage(named: "pinterest2")
 
         let results = try await ShotsToStitchesConverter.stitch(images: [pin1, pin2])
+
+        if !results.isEmpty {
+            try writeStitchOutputs(results, testName: "DeduplicationAndHeaderRemovalTests_VerticalScroll")
+        }
 
         XCTAssertEqual(results.count, 1, "Pinterest scroll must produce 1 panorama.")
         guard let panorama = results.first, let panoCG = panorama.cgImage, let pin1CG = pin1.cgImage else {
