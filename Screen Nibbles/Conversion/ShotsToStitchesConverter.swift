@@ -210,7 +210,34 @@ public final class ShotsToStitchesConverter: ShotsToStitchesConverting {
                     isFallback: isFallback
                 )
 
-                guard magnitude > 5 && magnitude < initialSafeHeight else { return }
+                guard magnitude < initialSafeHeight else { return }
+
+                // A near-zero magnitude doesn't necessarily mean "nothing
+                // changed" — it means Vision/vDSP couldn't find a confident
+                // *scroll* offset, which is exactly what happens when two
+                // frames show the same viewport position but disagree in a
+                // sub-region (a live element redrew, a modal appeared, etc).
+                // Previously this was treated as a failed match and the
+                // frame was dropped outright, silently discarding whatever
+                // that later frame actually captured. Instead, treat it as a
+                // same-position "replace": overlay this frame's full content
+                // band on top of whatever's already drawn there so far, so
+                // the later capture wins wherever the two disagree, rather
+                // than being blended pixel-by-pixel or thrown away.
+                guard magnitude > 5 else {
+                    let overlapHeight = min(CGFloat(initialSafeHeight), bottomCursor - topCursor)
+                    guard overlapHeight > 0 else { return }
+                    let cropY = height - chrome.bottom - Int(overlapHeight)
+                    let drawTop = bottomCursor - overlapHeight
+                    segments.append(
+                        StitchSegment(
+                            image: currentImg,
+                            cropRect: CGRect(x: 0, y: CGFloat(cropY), width: CGFloat(width), height: overlapHeight),
+                            drawRect: CGRect(x: 0, y: drawTop, width: CGFloat(width), height: overlapHeight)
+                        )
+                    )
+                    return
+                }
                 let drawHeight = CGFloat(magnitude)
 
                 if scrolledDown {
