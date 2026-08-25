@@ -156,7 +156,131 @@ public final class ShotsToStitchesConverter: ShotsToStitchesConverting {
 
         var topCursor: CGFloat = 0
         var bottomCursor: CGFloat = CGFloat(firstSegmentHeight)
+        var lastVerticalFrame = allCGImages[0]
         let sequenceHandler = VNSequenceRequestHandler()
+
+        // A capture can contain more than one distinct "shot": a vertical
+        // scroll can be interrupted by a horizontal carousel swipe, or by a
+        // jump too large/unrelated to explain as either. `finishedResults`
+        // collects every fully-resolved group (carousel strips, and vertical
+        // panoramas that got cut short by a mismatch) as the loop goes;
+        // `segments`/`topCursor`/`bottomCursor` always describe the vertical
+        // group that's still open.
+        var finishedResults: [PlatformImage] = []
+
+        // Carousel accumulation state for the currently in-progress
+        // horizontal run, if any. `carouselBandRows` is fixed by the FIRST
+        // pair detected as a carousel in a run, so every card in the strip
+        // is cropped to the same rows and lines up cleanly side by side.
+        var carouselSegments: [StitchSegment] = []
+        var carouselBandRows: (top: Int, bottom: Int)?
+        var carouselCanvasWidth: CGFloat = 0
+
+        // True while the open vertical group contains nothing but its
+        // original seed frame *and* that same seed frame has also been used
+        // to anchor a carousel strip. If the group never grows past that
+        // seed, emitting it standalone would just duplicate the carousel's
+        // first card, so it gets suppressed instead — the seed frame is
+        // still represented, just via the carousel.
+        var verticalSeedIsRedundant = false
+
+        func flushCarousel() {
+            guard !carouselSegments.isEmpty, let bandRows = carouselBandRows else { return }
+            let canvasHeight = bandRows.bottom - bandRows.top
+            if canvasHeight > 0,
+               let stripImage = render(segments: carouselSegments, canvasWidth: Int(carouselCanvasWidth), canvasHeight: canvasHeight) {
+                finishedResults.append(PlatformImage.create(cgImage: stripImage))
+            }
+            carouselSegments = []
+            carouselBandRows = nil
+            carouselCanvasWidth = 0
+        }
+
+        func appendCarouselFrame(previous: CGImage, current: CGImage, bandTop: Int, bandBottomExclusive: Int) {
+            let bandHeight = bandBottomExclusive - bandTop
+            guard bandHeight > 0 else { return }
+
+            if carouselSegments.isEmpty {
+                // Seed the strip with the ANCHOR frame's own card. That
+                // anchor is exactly whatever the open vertical group's most
+                // recent segment already is, so the first carousel card
+                // stays visible in the vertical scroll too, not just here.
+                carouselBandRows = (top: bandTop, bottom: bandBottomExclusive)
+                carouselSegments.append(
+                    StitchSegment(
+                        image: previous,
+                        cropRect: CGRect(x: 0, y: CGFloat(bandTop), width: CGFloat(width), height: CGFloat(bandHeight)),
+                        drawRect: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(bandHeight))
+                    )
+                )
+                carouselCanvasWidth = CGFloat(width)
+
+                if segments.count == 1 {
+                    verticalSeedIsRedundant = true
+                }
+            }
+
+            guard let fixedBand = carouselBandRows else { return }
+            let fixedHeight = fixedBand.bottom - fixedBand.top
+            carouselSegments.append(
+                StitchSegment(
+                    image: current,
+                    cropRect: CGRect(x: 0, y: CGFloat(fixedBand.top), width: CGFloat(width), height: CGFloat(fixedHeight)),
+                    drawRect: CGRect(x: carouselCanvasWidth, y: 0, width: CGFloat(width), height: CGFloat(fixedHeight))
+                )
+            )
+            carouselCanvasWidth += CGFloat(width)
+        }
+
+        func flushVerticalGroup() {
+            defer {
+                segments = []
+                topCursor = 0
+                bottomCursor = 0
+                verticalSeedIsRedundant = false
+            }
+            guard !segments.isEmpty else { return }
+
+            if segments.count == 1 && verticalSeedIsRedundant {
+                // Nothing but the shared seed frame — already preserved as
+                // the carousel's first card. Skip emitting a duplicate.
+                return
+            }
+
+            if chrome.bottom > 0 {
+                segments.append(
+                    StitchSegment(
+                        image: lastVerticalFrame,
+                        cropRect: CGRect(x: 0, y: CGFloat(height - chrome.bottom), width: CGFloat(width), height: CGFloat(chrome.bottom)),
+                        drawRect: CGRect(x: 0, y: bottomCursor, width: CGFloat(width), height: CGFloat(chrome.bottom))
+                    )
+                )
+                bottomCursor += CGFloat(chrome.bottom)
+            }
+
+            let originY = topCursor
+            for idx in segments.indices {
+                segments[idx].drawRect.origin.y -= originY
+            }
+            let totalHeight = Int((bottomCursor - originY).rounded())
+            guard totalHeight > 0,
+                  let image = render(segments: segments, canvasWidth: width, canvasHeight: totalHeight) else { return }
+            finishedResults.append(PlatformImage.create(cgImage: image))
+        }
+
+        func startNewVerticalGroup(anchor: CGImage) {
+            segments = [
+                StitchSegment(
+                    image: anchor,
+                    cropRect: CGRect(x: 0, y: CGFloat(chrome.top), width: CGFloat(width), height: CGFloat(initialSafeHeight)),
+                    drawRect: CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(initialSafeHeight))
+                )
+            ]
+            topCursor = 0
+            bottomCursor = CGFloat(initialSafeHeight)
+            lastVerticalFrame = anchor
+            verticalSeedIsRedundant = false
+        }
 
         for i in 1..<allCGImages.count {
             try autoreleasepool {
@@ -203,114 +327,236 @@ public final class ShotsToStitchesConverter: ShotsToStitchesConverting {
                 let scrolledDown = isFallback ? true : (signedEstimate >= 0)
                 let estimatedMagnitude = abs(signedEstimate)
 
-                let magnitude = refineAlignmentWithvDSP(
+                let (magnitude, quality) = refineAlignmentWithvDSP(
                     previous: prevContent,
                     current: currContent,
                     estimatedShift: estimatedMagnitude,
                     isFallback: isFallback
                 )
 
-                guard magnitude < initialSafeHeight else { return }
-
-                // A near-zero magnitude doesn't necessarily mean "nothing
-                // changed" — it means Vision/vDSP couldn't find a confident
-                // *scroll* offset, which is exactly what happens when two
-                // frames show the same viewport position but disagree in a
-                // sub-region (a live element redrew, a modal appeared, etc).
-                // Previously this was treated as a failed match and the
-                // frame was dropped outright, silently discarding whatever
-                // that later frame actually captured. Instead, treat it as a
-                // same-position "replace": overlay this frame's full content
-                // band on top of whatever's already drawn there so far, so
-                // the later capture wins wherever the two disagree, rather
-                // than being blended pixel-by-pixel or thrown away.
-                guard magnitude > 5 else {
-                    let overlapHeight = min(CGFloat(initialSafeHeight), bottomCursor - topCursor)
-                    guard overlapHeight > 0 else { return }
-                    let cropY = height - chrome.bottom - Int(overlapHeight)
-                    let drawTop = bottomCursor - overlapHeight
-                    segments.append(
-                        StitchSegment(
-                            image: currentImg,
-                            cropRect: CGRect(x: 0, y: CGFloat(cropY), width: CGFloat(width), height: overlapHeight),
-                            drawRect: CGRect(x: 0, y: drawTop, width: CGFloat(width), height: overlapHeight)
-                        )
-                    )
+                // A shift that pins against the safe-height ceiling couldn't
+                // be meaningfully searched — it's the clamp talking, not a
+                // real measurement. Rather than silently dropping the frame
+                // (losing whatever it captured), treat it the same as any
+                // other unexplainable jump: close out what's open and start
+                // a fresh shot from here.
+                guard magnitude < initialSafeHeight else {
+                    flushCarousel()
+                    flushVerticalGroup()
+                    startNewVerticalGroup(anchor: currentImg)
                     return
                 }
-                let drawHeight = CGFloat(magnitude)
 
-                // Redraw the CURRENT frame's *entire* visible content band —
-                // not just the sliver of new content the shift revealed —
-                // positioned so its already-seen portion lands exactly back
-                // on top of whatever the previous frame(s) already drew
-                // there. `render(segments:...)` draws segments in append
-                // order, so this later (lower-in-the-scroll) frame's pixels
-                // always win over the earlier frame's pixels in that shared
-                // band, the same "later capture wins" rule already used for
-                // the near-zero-shift replace case above. Without this, only
-                // the brand-new sliver got the current frame's pixels and
-                // the overlap region kept whatever the older frame drew —
-                // so a floating/transient element (e.g. a nav pill) that
-                // happened to render into an earlier frame but not the
-                // current one would stick around, and vice versa.
-                if scrolledDown {
-                    // Bottom edge of the full band already lines up with
-                    // this frame's own bottom (minus chrome); its top now
-                    // reaches up into the previously-drawn overlap.
-                    // (`height - chrome.bottom - initialSafeHeight == chrome.top`.)
-                    let drawTop = bottomCursor + drawHeight - CGFloat(initialSafeHeight)
-                    segments.append(
-                        StitchSegment(
-                            image: currentImg,
-                            cropRect: CGRect(x: 0, y: CGFloat(chrome.top), width: CGFloat(width), height: CGFloat(initialSafeHeight)),
-                            drawRect: CGRect(x: 0, y: drawTop, width: CGFloat(width), height: CGFloat(initialSafeHeight))
+                // Row-tolerant, zero-shift comparison of the two RAW frames
+                // (not just the chrome-cropped content band). This is the
+                // same measurement `detectStaticChrome` uses per-pair, reused
+                // here to find, for THIS pair, how much of the frame agrees
+                // outright with no shift at all — the signature of a bounded
+                // sub-region changing (a carousel swipe) rather than the
+                // whole viewport moving (a scroll) or everything disagreeing
+                // at once (a mismatch).
+                let (staticTop, staticBottom) = compareFrameChrome(frameA: previousImg, frameB: currentImg)
+                let direction = classifyTransition(
+                    magnitude: magnitude,
+                    quality: quality,
+                    visionSucceeded: !isFallback,
+                    staticTop: staticTop,
+                    staticBottom: staticBottom,
+                    height: height
+                )
+
+                switch direction {
+                case .verticalScroll:
+                    flushCarousel()
+                    let drawHeight = CGFloat(magnitude)
+
+                    // Redraw the CURRENT frame's *entire* visible content
+                    // band — not just the sliver of new content the shift
+                    // revealed — positioned so its already-seen portion
+                    // lands exactly back on top of whatever the previous
+                    // frame(s) already drew there. `render(segments:...)`
+                    // draws segments in append order, so this later
+                    // (lower-in-the-scroll) frame's pixels always win over
+                    // the earlier frame's pixels in that shared band, the
+                    // same "later capture wins" rule used for `.replace`
+                    // below. Without this, only the brand-new sliver got the
+                    // current frame's pixels and the overlap region kept
+                    // whatever the older frame drew — so a floating/
+                    // transient element (e.g. a nav pill) that happened to
+                    // render into an earlier frame but not the current one
+                    // would stick around, and vice versa.
+                    if scrolledDown {
+                        // Bottom edge of the full band already lines up with
+                        // this frame's own bottom (minus chrome); its top
+                        // now reaches up into the previously-drawn overlap.
+                        // (`height - chrome.bottom - initialSafeHeight == chrome.top`.)
+                        let drawTop = bottomCursor + drawHeight - CGFloat(initialSafeHeight)
+                        segments.append(
+                            StitchSegment(
+                                image: currentImg,
+                                cropRect: CGRect(x: 0, y: CGFloat(chrome.top), width: CGFloat(width), height: CGFloat(initialSafeHeight)),
+                                drawRect: CGRect(x: 0, y: drawTop, width: CGFloat(width), height: CGFloat(initialSafeHeight))
+                            )
                         )
-                    )
-                    bottomCursor += drawHeight
-                } else {
-                    // Top edge of the full band already lines up with this
-                    // frame's own top (plus chrome); its bottom now reaches
-                    // down into the previously-drawn overlap.
-                    let cropY = chrome.top
-                    let drawTop = topCursor - drawHeight
-                    segments.append(
-                        StitchSegment(
-                            image: currentImg,
-                            cropRect: CGRect(x: 0, y: CGFloat(cropY), width: CGFloat(width), height: CGFloat(initialSafeHeight)),
-                            drawRect: CGRect(x: 0, y: drawTop, width: CGFloat(width), height: CGFloat(initialSafeHeight))
+                        bottomCursor += drawHeight
+                    } else {
+                        // Top edge of the full band already lines up with
+                        // this frame's own top (plus chrome); its bottom now
+                        // reaches down into the previously-drawn overlap.
+                        let cropY = chrome.top
+                        let drawTop = topCursor - drawHeight
+                        segments.append(
+                            StitchSegment(
+                                image: currentImg,
+                                cropRect: CGRect(x: 0, y: CGFloat(cropY), width: CGFloat(width), height: CGFloat(initialSafeHeight)),
+                                drawRect: CGRect(x: 0, y: drawTop, width: CGFloat(width), height: CGFloat(initialSafeHeight))
+                            )
                         )
-                    )
-                    topCursor -= drawHeight
+                        topCursor -= drawHeight
+                    }
+                    lastVerticalFrame = currentImg
+
+                case .horizontalCarousel(let bandTop, let bandBottomExclusive):
+                    // Same viewport position, but a bounded band swapped
+                    // horizontally (a carousel swipe) rather than the small,
+                    // page-wide disagreement `.replace` handles. Keep it out
+                    // of the vertical stitch entirely and build/extend a
+                    // separate side-by-side strip instead. The vertical
+                    // group's current segment (its most recent frame, i.e.
+                    // `previousImg`) becomes the strip's first card, so that
+                    // frame stays part of the vertical scroll too.
+                    appendCarouselFrame(previous: previousImg, current: currentImg, bandTop: bandTop, bandBottomExclusive: bandBottomExclusive)
+
+                case .replace:
+                    flushCarousel()
+                    // A near-zero magnitude doesn't necessarily mean
+                    // "nothing changed" — it means Vision/vDSP couldn't find
+                    // a confident *scroll* offset, which is exactly what
+                    // happens when two frames show the same viewport
+                    // position but disagree in a sub-region (a live element
+                    // redrew, a modal appeared, etc). Treat it as a
+                    // same-position "replace": overlay this frame's full
+                    // content band on top of whatever's already drawn there
+                    // so far, so the later capture wins wherever the two
+                    // disagree, rather than being blended pixel-by-pixel or
+                    // thrown away.
+                    let overlapHeight = min(CGFloat(initialSafeHeight), bottomCursor - topCursor)
+                    if overlapHeight > 0 {
+                        let cropY = height - chrome.bottom - Int(overlapHeight)
+                        let drawTop = bottomCursor - overlapHeight
+                        segments.append(
+                            StitchSegment(
+                                image: currentImg,
+                                cropRect: CGRect(x: 0, y: CGFloat(cropY), width: CGFloat(width), height: overlapHeight),
+                                drawRect: CGRect(x: 0, y: drawTop, width: CGFloat(width), height: overlapHeight)
+                            )
+                        )
+                        lastVerticalFrame = currentImg
+                    }
+
+                case .mismatch:
+                    // Neither a vertical scroll nor a bounded carousel band
+                    // explains this transition — too different to be the
+                    // same shot. Close out whatever's open and start clean.
+                    flushCarousel()
+                    flushVerticalGroup()
+                    startNewVerticalGroup(anchor: currentImg)
                 }
             }
             progress(Double(i) / Double(allCGImages.count))
         }
 
-        if chrome.bottom > 0 {
-            segments.append(
-                StitchSegment(
-                    image: allCGImages.last!,
-                    cropRect: CGRect(x: 0, y: CGFloat(height - chrome.bottom), width: CGFloat(width), height: CGFloat(chrome.bottom)),
-                    drawRect: CGRect(x: 0, y: bottomCursor, width: CGFloat(width), height: CGFloat(chrome.bottom))
-                )
-            )
-            bottomCursor += CGFloat(chrome.bottom)
-        }
+        flushCarousel()
+        flushVerticalGroup()
 
-        // Normalize: shift every segment so the topmost content sits at y=0.
-        let originY = topCursor
-        for idx in segments.indices {
-            segments[idx].drawRect.origin.y -= originY
-        }
-        let totalHeight = Int((bottomCursor - originY).rounded())
-
-        guard let finalCGImage = render(segments: segments, canvasWidth: width, canvasHeight: totalHeight) else {
+        guard !finishedResults.isEmpty else {
             throw ShotsToStitchesError.compositingFailed
         }
 
         progress(1.0)
-        return [PlatformImage.create(cgImage: finalCGImage)]
+        return finishedResults
+    }
+
+    // MARK: - Frame-Transition Classification
+
+    /// What relationship, if any, connects two consecutive frames.
+    private enum SpanDirection: Equatable {
+        /// The page scrolled; `currentImg` extends the open vertical group.
+        case verticalScroll
+        /// Same scroll position, but a bounded row band swapped out (a
+        /// carousel swipe). `top`/`bottom` are the rows (in the ORIGINAL,
+        /// uncropped frame) that changed and should be split into their own
+        /// side-by-side strip.
+        case horizontalCarousel(top: Int, bottom: Int)
+        /// Same scroll position, no bounded band — a small in-place content
+        /// change (e.g. a live widget re-rendering). Overlaid onto the open
+        /// vertical group.
+        case replace
+        /// Too different to explain as any of the above; starts a new shot.
+        case mismatch
+    }
+
+    /// Classifies a frame transition in the order the person asked for:
+    /// is it a continued vertical scroll, then is it a horizontal carousel
+    /// swipe, and only if neither fits, a mismatch that starts a new shot.
+    ///
+    /// `staticTop`/`staticBottom` come from a zero-shift, row-tolerant
+    /// comparison of the two RAW frames (see `compareFrameChrome`): how many
+    /// rows agree outright from the top, and from the bottom, with no
+    /// translation applied at all. A real vertical scroll leaves almost
+    /// nothing static that way (everything moved). A same-position content
+    /// change (`.replace`, e.g. a "See more" expansion) typically leaves
+    /// one side — usually the top — static all the way down to wherever the
+    /// change starts, with little or nothing static on the OTHER side. A
+    /// carousel swipe is the one case where a substantial run is static on
+    /// BOTH sides at once, sandwiching a changed band in the interior —
+    /// which is why this uses `min`, not `max`, of the two runs: it's the
+    /// smaller of the two that proves the band is actually bounded rather
+    /// than open-ended toward an edge. (Thresholds below were calibrated
+    /// against this project's own carousel/replace/scroll sample pairs.)
+    private func classifyTransition(
+        magnitude: Int,
+        quality: Float,
+        visionSucceeded: Bool,
+        staticTop: Int,
+        staticBottom: Int,
+        height: Int
+    ) -> SpanDirection {
+        let bandTop = staticTop
+        let bandBottomExclusive = height - staticBottom
+        let bandHeight = bandBottomExclusive - bandTop
+        let boundedFraction = Double(min(staticTop, staticBottom)) / Double(max(height, 1))
+
+        let carouselLikely = bandHeight >= 40
+            && bandHeight <= Int(Double(height) * 0.85)
+            && boundedFraction >= 0.18
+
+        // A strongly bounded-on-both-sides band is a signature real
+        // scrolling essentially never produces (scrolling changes nearly
+        // the whole frame), so it's checked before trusting a vertical
+        // match — a coincidentally-plausible shift/quality score on two
+        // unrelated carousel cards shouldn't be able to hide the swipe.
+        if !carouselLikely {
+            // Vision reporting an explicit alignment is real evidence of a
+            // translational relationship, so a moderate quality score is
+            // still trusted. With no Vision result at all, the wide-radius
+            // vDSP fallback search is blind and more prone to false
+            // matches on unrelated content, so it's held to a tighter bar.
+            let verticalQualityCeiling: Float = visionSucceeded ? 40 : 14
+            if magnitude > 5 && quality <= verticalQualityCeiling {
+                return .verticalScroll
+            }
+        }
+
+        if carouselLikely {
+            return .horizontalCarousel(top: bandTop, bottom: bandBottomExclusive)
+        }
+
+        if magnitude <= 5 {
+            return .replace
+        }
+
+        return .mismatch
     }
 
     // MARK: - Core Types
@@ -478,9 +724,12 @@ public final class ShotsToStitchesConverter: ShotsToStitchesConverting {
 
     /// Refines a coarse shift *magnitude* (direction-agnostic — see call site,
     /// which tracks direction separately from the signed Vision estimate).
-    private func refineAlignmentWithvDSP(previous: CGImage, current: CGImage, estimatedShift: Int, isFallback: Bool) -> Int {
+    /// Also returns the match quality at that best shift — the mean
+    /// per-byte absolute difference (0 = identical, 255 = maximally
+    /// different) — so the caller can judge how much to trust it.
+    private func refineAlignmentWithvDSP(previous: CGImage, current: CGImage, estimatedShift: Int, isFallback: Bool) -> (shift: Int, quality: Float) {
         guard let prevData = previous.dataProvider?.data,
-              let currData = current.dataProvider?.data else { return estimatedShift }
+              let currData = current.dataProvider?.data else { return (estimatedShift, .greatestFiniteMagnitude) }
 
         let prevPtr = CFDataGetBytePtr(prevData)!
         let currPtr = CFDataGetBytePtr(currData)!
@@ -499,7 +748,7 @@ public final class ShotsToStitchesConverter: ShotsToStitchesConverting {
 
         let startY = max(0, estimatedShift - searchRadius)
         let endY = min(height - rowsToCompare - anchorYOffset, estimatedShift + searchRadius)
-        guard startY <= endY else { return estimatedShift }
+        guard startY <= endY else { return (estimatedShift, .greatestFiniteMagnitude) }
 
         let shifts = Array(startY...endY)
 
@@ -534,7 +783,8 @@ public final class ShotsToStitchesConverter: ShotsToStitchesConverting {
             lock.unlock()
         }
 
-        return bestShift
+        let quality = lowestDiff.isFinite ? lowestDiff / Float(totalFloats) : .greatestFiniteMagnitude
+        return (bestShift, quality)
     }
 
     private func findFeatureRichSlice(ptr: UnsafePointer<UInt8>, width: Int, height: Int, bytesPerRow: Int, rows: Int, bytesPerPixel: Int) -> Int {
