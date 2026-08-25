@@ -368,7 +368,22 @@ public final class ShotsToStitchesConverter: ShotsToStitchesConverting {
                 switch direction {
                 case .verticalScroll:
                     flushCarousel()
-                    let drawHeight = CGFloat(magnitude)
+                    // Deliberate small overlap bias: advance by N-1px instead
+                    // of the exact computed shift (mirrors macshot's
+                    // ScrollCaptureController seam treatment). Shift estimates
+                    // carry sub-pixel error from lossy video decoding, so the
+                    // row exactly at the computed boundary is the least
+                    // trustworthy pixel in the whole stitch. Advancing one row
+                    // short means this frame's full-band redraw covers one
+                    // extra row of already-drawn content at the boundary —
+                    // since later segments always win, that contested row is
+                    // decided by the newest capture instead of straddling two
+                    // slightly-misaligned renders. The un-drawn 1px sliver of
+                    // genuinely-new content isn't lost: the next segment's
+                    // band starts well inside drawn territory and picks it up.
+                    // Clamped at 1 so a degenerate magnitude can't stall the
+                    // cursor entirely.
+                    let drawHeight = CGFloat(max(1, magnitude - 1))
 
                     // Redraw the CURRENT frame's *entire* visible content
                     // band — not just the sliver of new content the shift

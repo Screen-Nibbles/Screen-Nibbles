@@ -17,7 +17,8 @@ final class ReplaceStitchTests: XCTestCase {
     func testReplaceOverlapsCorrectly() async throws {
         let images = [
             try loadImage(named: "replace1"),
-            try loadImage(named: "replace2")
+            try loadImage(named: "replace2"),
+            try loadImage(named: "replace3")
         ]
 
         let results = try await ShotsToStitchesConverter.stitch(images: images)
