@@ -151,6 +151,10 @@ public final class VideoFrameAnalyzer {
             if pts.isValid {
                 timestamps.append(pts.seconds)
             }
+            if timestamps.count % 120 == 0 {
+                if Task.isCancelled { reader.cancelReading(); throw CancellationError() }
+                await Task.yield()
+            }
         }
         reader.cancelReading()
 

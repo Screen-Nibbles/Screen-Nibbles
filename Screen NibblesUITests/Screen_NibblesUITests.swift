@@ -10,32 +10,51 @@ import XCTest
 final class Screen_NibblesUITests: XCTestCase {
 
     override func setUpWithError() throws {
-        // Put setup code here. This method is called before the invocation of each test method in the class.
-
-        // In UI tests it is usually best to stop immediately when a failure occurs.
         continueAfterFailure = false
-
-        // In UI tests it’s important to set the initial state - such as interface orientation - required for your tests before they run. The setUp method is a good place to do this.
-    }
-
-    override func tearDownWithError() throws {
-        // Put teardown code here. This method is called after the invocation of each test method in the class.
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testRecordingGuideIsReachableAndUsesReplayKitPicker() throws {
         let app = XCUIApplication()
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        let directRecordButton = app.buttons["Record Screen"]
+        if directRecordButton.waitForExistence(timeout: 2) {
+            directRecordButton.tap()
+        } else {
+            let options = app.buttons["Gallery Options"]
+            XCTAssertTrue(options.waitForExistence(timeout: 2), "Gallery actions should remain reachable")
+            options.tap()
+            let menuRecordButton = app.buttons["Record Screen"]
+            XCTAssertTrue(menuRecordButton.waitForExistence(timeout: 2))
+            menuRecordButton.tap()
+        }
+
+        XCTAssertTrue(app.navigationBars["Record Screen"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.otherElements["replaykitQuickStart"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.otherElements["replaykitBroadcastPicker"].exists)
+
+        let holdInstruction = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] %@", "touch and hold Screen Recording")
+        ).firstMatch
+        XCTAssertTrue(holdInstruction.exists, "Control Center hold instructions should be present")
+
+        app.buttons["Done"].tap()
+        XCTAssertFalse(app.navigationBars["Record Screen"].waitForExistence(timeout: 1))
+    }
+
+    @MainActor
+    func testPrimaryGalleryActionsRemainReachable() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Captures"].waitForExistence(timeout: 2))
+        let hasImport = app.buttons["Import Video"].exists || app.buttons["Select Video from Library"].exists
+        XCTAssertTrue(hasImport, "Video import should be reachable without a gesture-only interaction")
     }
 
     @MainActor
     func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
             XCUIApplication().launch()
         }

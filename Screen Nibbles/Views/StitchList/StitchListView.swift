@@ -1,22 +1,50 @@
 import SwiftUI
 #if canImport(UIKit)
 import PhotosUI
+import UIKit
 #endif
 import SwiftData
 import os
 import UniformTypeIdentifiers
 
-/// The primary stitch gallery screen: on iOS, renders a clean single-column image viewer stream
-/// with distinct visual cards, multi-selection for batch sharing/exporting, and ReplayKit screen recording.
+/// A date-grouped photo library with batch actions and automatic Control Center imports.
 struct StitchListView: View {
     @Query(sort: \Stitch.creationDate, order: .reverse) private var stitches: [Stitch]
     @Environment(\.modelContext) private var modelContext
 
     @State private var isPickingVideo = false
+    @State private var path: [Stitch] = []
+    @State private var createdStitch: Stitch?
+    @State private var showRecordingHelp = false
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var handledRecordings: Set<URL> = []
     @State private var pendingImport: VideoImportSource?
     #if canImport(UIKit)
     @State private var selectedPhotoItem: PhotosPickerItem?
     #endif
+
+    @AppStorage("galleryCompact") private var compactGrid = false
+    @AppStorage("galleryOldestFirst") private var oldestFirst = false
+    @State private var filter: GalleryFilter = .all
+
+    private enum GalleryFilter: String, CaseIterable, Identifiable {
+        case all = "All", vertical = "Vertical", horizontal = "Horizontal"
+        var id: String { rawValue }
+    }
+
+    private var visibleStitches: [Stitch] {
+        let filtered = stitches.filter { stitch in
+            guard filter != .all else { return true }
+            guard let image = GalleryImage(data: stitch.imageData) else { return false }
+            return filter == .horizontal ? image.isHorizontal : !image.isHorizontal
+        }
+        return oldestFirst ? Array(filtered.reversed()) : filtered
+    }
+
+    private var groupedStitches: [(date: Date, items: [Stitch])] {
+        let groups = Dictionary(grouping: visibleStitches) { Calendar.current.startOfDay(for: $0.creationDate) }
+        return groups.keys.sorted(by: oldestFirst ? (<) : (>)).map { ($0, groups[$0] ?? []) }
+    }
 
     // Multi-selection state
     @State private var isSelecting = false
@@ -41,12 +69,13 @@ struct StitchListView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             ZStack {
                 Group {
                     if stitches.isEmpty {
                         EmptyStitchListState(
-                            onSelectVideo: { beginPicking() }
+                            onSelectVideo: { beginPicking() },
+                            onRecord: { beginRecording() }
                         )
                     } else {
                         stitchFeedView
@@ -78,13 +107,14 @@ struct StitchListView: View {
                     .animation(.spring(response: 0.35, dampingFraction: 0.8), value: showToast)
                 }
             }
-            .navigationTitle(isSelecting ? "\(selectedIDs.count) Selected" : "Screen Nibbles")
+            .navigationTitle(isSelecting ? "\(selectedIDs.count) Selected" : "Captures")
             .toolbar {
                 ToolbarItem(placement: leadingPlacement) {
                     if isSelecting {
-                        Button(selectedIDs.count == stitches.count ? "Deselect All" : "Select All") {
+                        Button(Set(visibleStitches.map(\.id)).isSubset(of: selectedIDs) ? "Deselect All" : "Select All") {
                             toggleSelectAll()
                         }
+                        .disabled(visibleStitches.isEmpty)
                     }
                 }
 
@@ -102,8 +132,20 @@ struct StitchListView: View {
                     }
 
                     if !isSelecting {
+                        Menu {
+                            Picker("Thumbnail size", selection: $compactGrid) {
+                                Text("Large thumbnails").tag(false)
+                                Text("Small thumbnails").tag(true)
+                            }
+                            Picker("Sort", selection: $oldestFirst) {
+                                Text("Newest first").tag(false)
+                                Text("Oldest first").tag(true)
+                            }
+                            Divider()
+                            Button("Record Screen", systemImage: "record.circle", action: beginRecording)
+                        } label: { Label("Gallery Options", systemImage: "slider.horizontal.3") }
                         Button(action: { beginPicking() }) {
-                            Label("Select Video", systemImage: "plus")
+                            Label("Import Video", systemImage: "plus")
                         }
                     }
                 }
@@ -135,9 +177,48 @@ struct StitchListView: View {
                 }
             }
             #endif
-            .sheet(item: $pendingImport) { source in
+            .navigationDestination(for: Stitch.self) { stitch in
+                StitchBrowserView(initialStitch: stitch, oldestFirst: oldestFirst, horizontalOnly: browsingFilter(for: stitch))
+            }
+            .task(id: scenePhase) {
+                guard scenePhase == .active else { return }
+                handledRecordings.removeAll()
+                while !Task.isCancelled {
+                    checkForRecordings()
+                    try? await Task.sleep(for: .seconds(2))
+                }
+            }
+            .sheet(isPresented: $showRecordingHelp) {
+                #if os(iOS)
+                ReplayKitRecordingView()
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                #else
                 NavigationStack {
-                    VideoImportProcessingView(source: source) { _ in }
+                    ContentUnavailableView(
+                        "Record on iPhone or iPad",
+                        systemImage: "iphone",
+                        description: Text("Screen Nibbles uses ReplayKit for direct screen capture on iOS. You can still import a compatible movie on this platform.")
+                    )
+                    .navigationTitle("Record Screen")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showRecordingHelp = false }
+                        }
+                    }
+                }
+                #endif
+            }
+            .sheet(item: $pendingImport, onDismiss: {
+                if let createdStitch {
+                    path.append(createdStitch)
+                    self.createdStitch = nil
+                }
+            }) { source in
+                NavigationStack {
+                    VideoImportProcessingView(source: source) { stitch in
+                        if createdStitch == nil { createdStitch = stitch }
+                    }
                 }
                 #if canImport(AppKit)
                 .frame(width: 700, height: 560)
@@ -156,44 +237,68 @@ struct StitchListView: View {
         }
     }
 
-    /// Single-column feed view ensuring clear visual distinction, rich card viewer framing, and high visibility.
     private var stitchFeedView: some View {
         ScrollView {
-            LazyVStack(spacing: 20) {
-                ForEach(stitches) { stitch in
-                    let isSelected = selectedIDs.contains(stitch.id)
+            VStack(alignment: .leading, spacing: 24) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Your captures").font(.largeTitle.bold())
+                        Text("\(stitches.count) image\(stitches.count == 1 ? "" : "s") · Pages, swipes, and everything in between")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                Picker("Capture type", selection: $filter) {
+                    ForEach(GalleryFilter.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 420)
 
-                    Group {
-                        if isSelecting {
-                            StitchGridItem(
-                                stitch: stitch,
-                                isSelectionMode: true,
-                                isSelected: isSelected,
-                                onToggleSelection: {
-                                    toggleSelection(for: stitch)
+                if visibleStitches.isEmpty {
+                    ContentUnavailableView("No \(filter.rawValue.lowercased()) images", systemImage: "photo.on.rectangle",
+                        description: Text("Choose All to see the rest of your library."))
+                        .frame(maxWidth: .infinity).padding(.vertical, 48)
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 28) {
+                        ForEach(groupedStitches, id: \.date) { group in
+                            VStack(alignment: .leading, spacing: 14) {
+                                HStack {
+                                    Text(dayTitle(group.date)).font(.title3.bold())
+                                    Spacer()
+                                    Text("\(group.items.count)").font(.subheadline.monospacedDigit()).foregroundStyle(.secondary)
                                 }
-                            )
-                        } else {
-                            NavigationLink(value: stitch) {
-                                StitchGridItem(
-                                    stitch: stitch,
-                                    isSelectionMode: false,
-                                    isSelected: false
-                                )
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: compactGrid ? 100 : 150), spacing: 14)], spacing: 20) {
+                                    ForEach(group.items) { stitch in
+                                        StitchGridItem(stitch: stitch, isSelectionMode: isSelecting,
+                                            isSelected: selectedIDs.contains(stitch.id),
+                                            onToggleSelection: { toggleSelection(for: stitch) },
+                                            onOpen: { path.append(stitch) },
+                                            onSelect: { isSelecting = true; toggleSelection(for: stitch) })
+                                    }
+                                }
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .frame(maxWidth: 680)
+            .padding(20)
+            .frame(maxWidth: 1200)
             .frame(maxWidth: .infinity)
         }
-        .navigationDestination(for: Stitch.self) { stitch in
-            StitchDetailView(stitch: stitch)
-        }
+        .animation(.easeInOut(duration: 0.2), value: compactGrid)
+    }
+
+    private func browsingFilter(for stitch: Stitch) -> Bool? {
+        guard filter != .all else { return nil }
+        let horizontal = filter == .horizontal
+        // A newly imported capture should open even if it is outside the current filter.
+        return GalleryImage(data: stitch.imageData)?.isHorizontal == horizontal ? horizontal : nil
+    }
+
+    private func dayTitle(_ date: Date) -> String {
+        if Calendar.current.isDateInToday(date) { return "Today" }
+        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
+        return date.formatted(date: .abbreviated, time: .omitted)
     }
 
     /// Floating bottom action bar during multi-selection mode.
@@ -225,8 +330,9 @@ struct StitchListView: View {
             }
             .buttonStyle(.bordered)
         }
+        .controlSize(.large)
         .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.vertical, 12)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: Color.black.opacity(0.12), radius: 10, x: 0, y: 4)
@@ -250,11 +356,9 @@ struct StitchListView: View {
     }
 
     private func toggleSelectAll() {
-        if selectedIDs.count == stitches.count {
-            selectedIDs.removeAll()
-        } else {
-            selectedIDs = Set(stitches.map { $0.id })
-        }
+        let visibleIDs = Set(visibleStitches.map(\.id))
+        if visibleIDs.isSubset(of: selectedIDs) { selectedIDs.subtract(visibleIDs) }
+        else { selectedIDs.formUnion(visibleIDs) }
         prepareBatchShareURLs()
     }
 
@@ -263,8 +367,8 @@ struct StitchListView: View {
         for stitch in selectedStitches {
             guard let data = stitch.imageData else { continue }
             let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("stitch-\(stitch.id.uuidString).jpg")
-            try? data.write(to: tempURL)
-            urls.append(tempURL)
+            do { try data.write(to: tempURL, options: .atomic); urls.append(tempURL) }
+            catch { triggerToast("Could not prepare one of the selected images") }
         }
         batchShareURLs = urls
     }
@@ -285,6 +389,9 @@ struct StitchListView: View {
     private func triggerToast(_ message: String) {
         toastMessage = message
         showToast = true
+        #if canImport(UIKit)
+        UIAccessibility.post(notification: .announcement, argument: message)
+        #endif
         Task {
             try? await Task.sleep(nanoseconds: 2_500_000_000)
             await MainActor.run {
@@ -295,6 +402,41 @@ struct StitchListView: View {
         }
     }
 
+    private func beginRecording() {
+        showRecordingHelp = true
+    }
+
+    private func checkForRecordings() {
+        #if os(iOS)
+        guard pendingImport == nil, !isPickingVideo,
+              let directory = BroadcastRecordingInbox.sharedRecordingsDirectory() else { return }
+        BroadcastRecordingInbox.removeStalePartialSessions(
+            in: directory,
+            olderThan: Date().addingTimeInterval(-24 * 60 * 60)
+        )
+        guard let url = BroadcastRecordingInbox.readyRecordings(
+            in: directory,
+            excluding: handledRecordings
+        ).first else { return }
+
+        handledRecordings.insert(url)
+
+        // A person normally opens this guide immediately before leaving the app
+        // to record. When they come back, dismiss it before presenting the
+        // processing sheet so SwiftUI never has to transition between two
+        // competing sheet presentations in the same update cycle.
+        if showRecordingHelp {
+            showRecordingHelp = false
+            Task { @MainActor in
+                await Task.yield()
+                pendingImport = .broadcastURL(url)
+            }
+        } else {
+            pendingImport = .broadcastURL(url)
+        }
+        #endif
+    }
+
     private func beginPicking() {
         Log.capture.info("Add tapped — opening video picker")
         isPickingVideo = true
@@ -303,6 +445,7 @@ struct StitchListView: View {
 
 private struct EmptyStitchListState: View {
     var onSelectVideo: () -> Void
+    var onRecord: () -> Void
 
     var body: some View {
         VStack(spacing: 24) {
@@ -314,13 +457,19 @@ private struct EmptyStitchListState: View {
             Text("Welcome to Screen Nibbles")
                 .font(.title2.bold())
 
-            Text("Select a video to automatically stitch your moments into a continuous panorama.")
+            Text("Capture a scrolling screen and turn it into a continuous image. Vertical pages and horizontal swipes are stitched automatically.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
-            VStack(spacing: 12) {                Button(action: onSelectVideo) {
+            VStack(spacing: 12) {
+                Button(action: onRecord) {
+                    Label("Record Screen", systemImage: "record.circle")
+                        .font(.headline).frame(maxWidth: .infinity).padding()
+                }
+                .buttonStyle(.borderedProminent)
+                Button(action: onSelectVideo) {
                     Label("Select Video from Library", systemImage: "film.stack")
                         .font(.subheadline.weight(.medium))
                         .frame(maxWidth: .infinity)

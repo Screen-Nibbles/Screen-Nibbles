@@ -34,14 +34,14 @@ public struct ExtractedShot: Sendable {
 /// Errors thrown while extracting shots from a video.
 public enum VideoToShotsError: LocalizedError {
     case noVideoTrack
-    case notVariableFrameRate
+    case invalidDuration
 
     public var errorDescription: String? {
         switch self {
         case .noVideoTrack:
             return "No video track found in the selected file."
-        case .notVariableFrameRate:
-            return "This video isn't supported yet. Constant frame-rate processing is disabled."
+        case .invalidDuration:
+            return "The selected recording has no playable duration."
         }
     }
 }
@@ -82,7 +82,7 @@ struct FrameSettleHash {
 
         guard let data = context.data else { return nil }
         let buffer = data.bindMemory(to: UInt8.self, capacity: size * size)
-        bytes = Array(UnsafeBufferPointer(start: buffer, count: size * size))
+        bytes = UnsafeBufferPointer(start: buffer, count: size * size).map { $0 >> 4 }
     }
 
     func matches(_ other: FrameSettleHash) -> Bool {
@@ -101,17 +101,20 @@ struct FrameSettleHash {
 /// Converts a screen recording video into a series of static shots by detecting pauses.
 @MainActor
 public final class VideoToShotsConverter: VideoToShotsConverting {
-    private let maxFrameDimension: CGFloat = 2000
+    private let maxFrameDimension: CGFloat
     private let analyzer = VideoFrameAnalyzer()
 
-    public init() {}
+    public init(maxFrameDimension: CGFloat = 2000) {
+        self.maxFrameDimension = max(640, maxFrameDimension)
+    }
 
     /// Static convenience method for extracting representative frames from a video.
     public static func extractFrames(
         from url: URL,
+        maxFrameDimension: CGFloat = 2000,
         progress: @escaping (Double) -> Void = { _ in }
     ) async throws -> [ExtractedShot] {
-        let converter = VideoToShotsConverter()
+        let converter = VideoToShotsConverter(maxFrameDimension: maxFrameDimension)
         return try await converter.convert(from: url, progress: progress)
     }
 
@@ -130,11 +133,66 @@ public final class VideoToShotsConverter: VideoToShotsConverting {
 
         guard let pauseWindows = try await analyzer.detectPauses(in: asset), !pauseWindows.isEmpty else {
             Log.frames.notice("\(url.lastPathComponent, privacy: .public) has no usable pause signal.")
-            throw VideoToShotsError.notVariableFrameRate
+            return try await extractSampledFrames(from: asset, progress: progress)
         }
 
         Log.frames.info("Extracting a settled frame for each of \(pauseWindows.count, privacy: .public) native pause window(s)")
         let frames = try await extractSettledFrames(for: pauseWindows, from: asset, progress: progress)
+        if frames.isEmpty { return try await extractSampledFrames(from: asset, progress: progress) }
+        return frames
+    }
+
+    /// Constant-rate encoders do not expose pauses in sample timing. Look for
+    /// settled content instead, retaining each distinct stop in capture order.
+    private func extractSampledFrames(from asset: AVURLAsset, progress: @escaping (Double) -> Void) async throws -> [ExtractedShot] {
+        let duration = try await asset.load(.duration).seconds
+        guard duration.isFinite, duration > 0 else { throw VideoToShotsError.invalidDuration }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: maxFrameDimension, height: maxFrameDimension)
+        let step = max(0.2, duration / 1800)
+        let count = max(1, Int(ceil(duration / step)))
+        var frames: [ExtractedShot] = []
+        var previousHash: FrameSettleHash?
+        var savedHash: FrameSettleHash?
+        var lastImage: CGImage?
+        var lastTime: Double = 0
+        var decodeFailures = 0
+        for index in 0..<count {
+            try Task.checkCancellation()
+            let seconds = min(Double(index) * step, max(0, duration - 0.01))
+            progress(Double(index + 1) / Double(count))
+            let image: CGImage
+            do {
+                let result = try await generator.image(at: CMTime(seconds: seconds, preferredTimescale: 600))
+                image = result.image
+            } catch {
+                // One damaged GOP/frame should not invalidate a long screen
+                // recording. The next sample usually decodes cleanly.
+                decodeFailures += 1
+                await Task.yield()
+                continue
+            }
+            if FrameFilter.isIosControlCenter(image) { continue }
+            guard let hash = FrameSettleHash(cgImage: image) else { continue }
+            lastImage = image
+            lastTime = seconds
+            if let previousHash, hash.matches(previousHash),
+               savedHash.map({ !hash.matches($0) }) ?? true {
+                frames.append(ExtractedShot(timestamp: seconds, image: PlatformImage.from(cgImage: image)))
+                savedHash = hash
+            }
+            previousHash = hash
+            // Yield between expensive samples so Cancel and progress remain responsive.
+            await Task.yield()
+        }
+        if let lastImage, let hash = FrameSettleHash(cgImage: lastImage),
+           savedHash.map({ !hash.matches($0) }) ?? true {
+            frames.append(ExtractedShot(timestamp: lastTime, image: PlatformImage.from(cgImage: lastImage)))
+        }
+        if decodeFailures > 0 {
+            Log.frames.notice("Skipped \(decodeFailures, privacy: .public) sampled frame(s) that failed to decode")
+        }
         return frames
     }
 
@@ -173,6 +231,7 @@ public final class VideoToShotsConverter: VideoToShotsConverting {
         var decodeFailures = 0
 
         for (windowIndex, window) in windows.enumerated() {
+            try Task.checkCancellation()
             defer { progress(Double(windowIndex + 1) / Double(windows.count)) }
 
             let duration = max(0, window.endTime - window.startTime)

@@ -6,6 +6,69 @@
 	objectVersion = 77;
 	objects = {
 
+        A10000000000000000000001 = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; path = "Screen Nibbles Broadcast.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+        A10000000000000000000002 = {isa = PBXFileSystemSynchronizedRootGroup; exceptions = (A10000000000000000000003,); path = "Screen Nibbles Broadcast"; sourceTree = "<group>"; };
+        A10000000000000000000003 = {isa = PBXFileSystemSynchronizedBuildFileExceptionSet; membershipExceptions = (Info.plist, Broadcast.entitlements,); target = A10000000000000000000004; };
+        A10000000000000000000004 = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = A10000000000000000000005;
+            buildPhases = (A10000000000000000000006, A10000000000000000000007, A10000000000000000000008,);
+            buildRules = (); dependencies = ();
+            fileSystemSynchronizedGroups = (A10000000000000000000002,);
+            name = "Screen Nibbles Broadcast";
+            productName = "Screen Nibbles Broadcast";
+            productReference = A10000000000000000000001;
+            productType = "com.apple.product-type.app-extension";
+        };
+        A10000000000000000000005 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000009, A1000000000000000000000A,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+        A10000000000000000000006 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+        A10000000000000000000007 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+        A10000000000000000000008 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+        A1000000000000000000000B = {isa = PBXBuildFile; fileRef = A10000000000000000000001; platformFilters = (ios,); settings = {ATTRIBUTES = (RemoveHeadersOnCopy,); }; };
+        A1000000000000000000000C = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (A1000000000000000000000B,); name = "Embed Broadcast Extension"; runOnlyForDeploymentPostprocessing = 0; };
+        A1000000000000000000000D = {isa = PBXTargetDependency; target = A10000000000000000000004; platformFilters = (ios,); };
+        A10000000000000000000009 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {
+            APPLICATION_EXTENSION_API_ONLY = YES;
+            CODE_SIGN_ENTITLEMENTS = "Screen Nibbles Broadcast/Broadcast.entitlements";
+            CODE_SIGN_STYLE = Automatic;
+            CURRENT_PROJECT_VERSION = 1;
+            DEVELOPMENT_TEAM = B3GWE7NQU6;
+            GENERATE_INFOPLIST_FILE = YES;
+            INFOPLIST_FILE = "Screen Nibbles Broadcast/Info.plist";
+            IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+            LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+            MARKETING_VERSION = 1.0;
+            PRODUCT_BUNDLE_IDENTIFIER = "com.tomaslin.Screen-Nibbles.Broadcast";
+            PRODUCT_NAME = "$(TARGET_NAME)";
+            REGISTER_APP_GROUPS = YES;
+            SDKROOT = iphoneos;
+            SKIP_INSTALL = YES;
+            SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+            SWIFT_VERSION = 5.0;
+            TARGETED_DEVICE_FAMILY = "1,2";
+        }; };
+        A1000000000000000000000A = {isa = XCBuildConfiguration; name = Release; buildSettings = {
+            APPLICATION_EXTENSION_API_ONLY = YES;
+            CODE_SIGN_ENTITLEMENTS = "Screen Nibbles Broadcast/Broadcast.entitlements";
+            CODE_SIGN_STYLE = Automatic;
+            CURRENT_PROJECT_VERSION = 1;
+            DEVELOPMENT_TEAM = B3GWE7NQU6;
+            GENERATE_INFOPLIST_FILE = YES;
+            INFOPLIST_FILE = "Screen Nibbles Broadcast/Info.plist";
+            IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+            LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+            MARKETING_VERSION = 1.0;
+            PRODUCT_BUNDLE_IDENTIFIER = "com.tomaslin.Screen-Nibbles.Broadcast";
+            PRODUCT_NAME = "$(TARGET_NAME)";
+            REGISTER_APP_GROUPS = YES;
+            SDKROOT = iphoneos;
+            SKIP_INSTALL = YES;
+            SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+            SWIFT_VERSION = 5.0;
+            TARGETED_DEVICE_FAMILY = "1,2";
+        }; };
+
+
 /* Begin PBXContainerItemProxy section */
 		BFF3564C3036348B0056D540 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -34,6 +97,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+                ScreenNibbles.entitlements,
 			);
 			target = BFF356393036348A0056D540 /* Screen Nibbles */;
 		};
@@ -89,6 +153,7 @@
 			isa = PBXGroup;
 			children = (
 				BFF3563C3036348A0056D540 /* Screen Nibbles */,
+                A10000000000000000000002,
 				BFF3564E3036348B0056D540 /* Screen NibblesTests */,
 				BFF356583036348B0056D540 /* Screen NibblesUITests */,
 				BFF3563B3036348A0056D540 /* Products */,
@@ -99,6 +164,7 @@
 			isa = PBXGroup;
 			children = (
 				BFF3563A3036348A0056D540 /* Screen Nibbles.app */,
+                A10000000000000000000001,
 				BFF3564B3036348B0056D540 /* Screen NibblesTests.xctest */,
 				BFF356553036348B0056D540 /* Screen NibblesUITests.xctest */,
 			);
@@ -115,10 +181,12 @@
 				BFF356363036348A0056D540 /* Sources */,
 				BFF356373036348A0056D540 /* Frameworks */,
 				BFF356383036348A0056D540 /* Resources */,
+                A1000000000000000000000C,
 			);
 			buildRules = (
 			);
 			dependencies = (
+                A1000000000000000000000D,
 			);
 			fileSystemSynchronizedGroups = (
 				BFF3563C3036348A0056D540 /* Screen Nibbles */,
@@ -213,6 +281,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+                A10000000000000000000004,
 				BFF356393036348A0056D540 /* Screen Nibbles */,
 				BFF3564A3036348B0056D540 /* Screen NibblesTests */,
 				BFF356543036348B0056D540 /* Screen NibblesUITests */,
@@ -296,6 +365,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Screen Nibbles/Info.plist";
+                "CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "Screen Nibbles/ScreenNibbles.entitlements";
+                "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "Screen Nibbles/ScreenNibbles.entitlements";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -306,24 +377,21 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
-				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.tomaslin.Screen-Nibbles";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
-				SDKROOT = auto;
+				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				XROS_DEPLOYMENT_TARGET = 26.5;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -341,6 +409,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Screen Nibbles/Info.plist";
+                "CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "Screen Nibbles/ScreenNibbles.entitlements";
+                "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = "Screen Nibbles/ScreenNibbles.entitlements";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -351,24 +421,21 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
-				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.tomaslin.Screen-Nibbles";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
-				SDKROOT = auto;
+				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
-				XROS_DEPLOYMENT_TARGET = 26.5;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
 		};
@@ -496,21 +563,19 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = B3GWE7NQU6;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.tomaslin.Screen-NibblesTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
+				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Screen Nibbles.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Screen Nibbles";
-				XROS_DEPLOYMENT_TARGET = 26.5;
 			};
 			name = Debug;
 		};
@@ -522,21 +587,19 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = B3GWE7NQU6;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.tomaslin.Screen-NibblesTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
+				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Screen Nibbles.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Screen Nibbles";
-				XROS_DEPLOYMENT_TARGET = 26.5;
 			};
 			name = Release;
 		};
@@ -547,21 +610,19 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = B3GWE7NQU6;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.tomaslin.Screen-NibblesUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
+				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = "Screen Nibbles";
-				XROS_DEPLOYMENT_TARGET = 26.5;
 			};
 			name = Debug;
 		};
@@ -572,21 +633,19 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = B3GWE7NQU6;
 				GENERATE_INFOPLIST_FILE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "com.tomaslin.Screen-NibblesUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = auto;
+				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = "Screen Nibbles";
-				XROS_DEPLOYMENT_TARGET = 26.5;
 			};
 			name = Release;
 		};

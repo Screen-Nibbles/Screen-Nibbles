@@ -10,8 +10,7 @@ struct VideoTransferable: Transferable {
         FileRepresentation(contentType: .movie) { movie in
             SentTransferredFile(movie.url)
         } importing: { received in
-            let copy = URL.documentsDirectory.appendingPathComponent("video_\(UUID().uuidString).mp4")
-            try FileManager.default.copyItem(at: received.file, to: copy)
+            let copy = try VideoStorage.copyToLibrary(from: received.file)
             return VideoTransferable(url: copy)
         }
     }

@@ -9,13 +9,14 @@ import os
 /// Where an in-progress video import came from — either a picked file, photo item, or live recording URL.
 enum VideoImportSource: Identifiable {
     case fileURL(URL)
+    case broadcastURL(URL)
     #if canImport(UIKit)
     case photoItem(PhotosPickerItem)
     #endif
 
     var id: String {
         switch self {
-        case .fileURL(let url):
+        case .fileURL(let url), .broadcastURL(let url):
             return url.absoluteString
         #if canImport(UIKit)
         case .photoItem(let item):
@@ -33,6 +34,7 @@ struct VideoImportProcessingView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
+    @State private var started = false
     @State private var progress: Double = 0.0
     @State private var statusText = "Finding the best moments…"
     @State private var errorMessage: String?
@@ -56,7 +58,12 @@ struct VideoImportProcessingView: View {
                 Button("Cancel") { dismiss() }
             }
         }
-        .task { await beginImport() }
+        .interactiveDismissDisabled(errorMessage == nil)
+        .task {
+            guard !started else { return }
+            started = true
+            await beginImport()
+        }
     }
 
     /// Resolves the source video and begins processing.
@@ -65,6 +72,8 @@ struct VideoImportProcessingView: View {
         do {
             let url: URL
             switch source {
+            case .broadcastURL(let sourceURL):
+                url = try await localCopy(of: sourceURL)
             case .fileURL(let sourceURL):
                 url = try await localCopy(of: sourceURL)
             #if canImport(UIKit)
@@ -90,11 +99,23 @@ struct VideoImportProcessingView: View {
         let didAccess = sourceURL.startAccessingSecurityScopedResource()
         defer { if didAccess { sourceURL.stopAccessingSecurityScopedResource() } }
 
-        let ext = sourceURL.pathExtension.isEmpty ? "mp4" : sourceURL.pathExtension
-        let localURL = URL.documentsDirectory.appendingPathComponent("video_\(UUID().uuidString).\(ext)")
-        Log.capture.info("Copying picked file \(sourceURL.lastPathComponent, privacy: .public) into app storage as \(localURL.lastPathComponent, privacy: .public)")
-        try FileManager.default.copyItem(at: sourceURL, to: localURL)
-        return localURL
+        // Broadcast extensions and file providers can publish a URL a moment
+        // before its final bytes are visible to the containing app. Give that
+        // hand-off a few short chances rather than surfacing a raw ENOENT.
+        var lastError: Error = VideoStorage.StorageError.sourceMissing
+        for attempt in 0..<4 {
+            try Task.checkCancellation()
+            do {
+                let localURL = try VideoStorage.copyToLibrary(from: sourceURL)
+                Log.capture.info("Copied \(sourceURL.lastPathComponent, privacy: .public) into app storage as \(localURL.lastPathComponent, privacy: .public)")
+                return localURL
+            } catch {
+                lastError = error
+                guard attempt < 3 else { break }
+                try await Task.sleep(for: .milliseconds(180 * (attempt + 1)))
+            }
+        }
+        throw lastError
     }
 
     private func processVideoURL(url: URL) async {
@@ -102,7 +123,10 @@ struct VideoImportProcessingView: View {
         progress = 0.0
         Log.capture.info("Extracting frames from \(url.lastPathComponent, privacy: .public)")
 
+        var saved = false
+        defer { if !saved { try? FileManager.default.removeItem(at: url) } }
         do {
+            try Task.checkCancellation()
             let converter = VideoToShotsConverter()
             let frames = try await converter.convert(from: url) { p in
                 Task { @MainActor in self.progress = p }
@@ -129,12 +153,15 @@ struct VideoImportProcessingView: View {
                 return
             }
 
+            try Task.checkCancellation()
+            let encodedImages = stitchedImages.compactMap { $0.jpegData(compressionQuality: 0.95) }
+            guard encodedImages.count == stitchedImages.count else { throw ShotsToStitchesError.compositingFailed }
             let duration = (try? await AVURLAsset(url: url).load(.duration).seconds) ?? 0
             let video = Video(filename: url.lastPathComponent, duration: duration)
             modelContext.insert(video)
 
-            for stitchedImage in stitchedImages {
-                guard let imageData = stitchedImage.jpegData(compressionQuality: 0.9) else { continue }
+            var created: [Stitch] = []
+            for imageData in encodedImages {
                 Log.capture.info("Stitch complete: \(imageData.count, privacy: .public) byte(s), source duration \(duration, format: .fixed(precision: 1), privacy: .public)s")
 
                 let stitch = Stitch(
@@ -143,10 +170,27 @@ struct VideoImportProcessingView: View {
                 )
                 modelContext.insert(stitch)
                 Log.capture.info("Saved new stitch \(stitch.id.uuidString, privacy: .public)")
-                onStitchCreated(stitch)
+                created.append(stitch)
             }
 
+            do { try modelContext.save() }
+            catch {
+                for stitch in created { modelContext.delete(stitch) }
+                modelContext.delete(video)
+                throw error
+            }
+            saved = true
+            if case .broadcastURL(let sourceURL) = source {
+                try? FileManager.default.removeItem(at: sourceURL)
+                let directory = sourceURL.deletingLastPathComponent()
+                if (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).isEmpty) == true {
+                    try? FileManager.default.removeItem(at: directory)
+                }
+            }
+            for stitch in created { onStitchCreated(stitch) }
             dismiss()
+        } catch is CancellationError {
+            return
         } catch {
             Log.capture.error("Processing failed for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
             errorMessage = error.localizedDescription
@@ -165,6 +209,8 @@ struct ProcessingIndicator: View {
                 .progressViewStyle(.linear)
                 .tint(.accentColor)
                 .padding(.horizontal, 40)
+                .accessibilityLabel(statusText)
+                .accessibilityValue("\(Int(progress * 100)) percent")
             Text("\(statusText)\n\(Int(progress * 100))%")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
@@ -186,7 +232,8 @@ struct ImportErrorState: View {
                 .foregroundStyle(.red)
                 .multilineTextAlignment(.center)
             Button("Close", action: onClose)
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
         }
         .padding()
     }

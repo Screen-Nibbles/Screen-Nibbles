@@ -9,6 +9,8 @@ final class Video {
     var filename: String
     var duration: TimeInterval
     var creationDate: Date
+    /// Normalized text-selection rectangles keyed by extracted-frame timestamp.
+    @Attribute(.externalStorage) var textCropData: Data?
 
     @Relationship(inverse: \Stitch.videos)
     var stitches: [Stitch]?
@@ -22,11 +24,16 @@ final class Video {
         self.filename = filename
         self.duration = duration
         self.creationDate = creationDate
+        self.textCropData = nil
     }
 
-    /// The resolved file URL of the video in the documents directory.
+    /// The preferred file URL for newly imported videos.
     var url: URL {
-        let urls = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
-        return urls[0].appendingPathComponent(filename)
+        VideoStorage.directory.appendingPathComponent(filename)
     }
+
+    /// A readable source URL, including the legacy Documents location used by
+    /// older builds. Missing originals are expected after restores/cleanup and
+    /// should be handled as a recoverable state rather than a file-system error.
+    var existingURL: URL? { VideoStorage.existingURL(for: filename) }
 }
